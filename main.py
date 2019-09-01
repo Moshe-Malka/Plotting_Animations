@@ -1,34 +1,17 @@
-from celluloid import Camera
-
 import json
 import time
-import os
-import sys
-from pathlib import Path
 
+from celluloid import Camera
 import numpy as np
 import pandas as pd
-from scipy.stats import zscore
 from matplotlib import pyplot as plt
-plt.ioff()      # Turns interactive plotting off
 
-from ConverterService import convert
+from Utilities import convert
 
 ######################################### Globals ##########################################################
-midpointX = 684
-midpointY = 456
-Termx = midpointX * 2
-Termy = midpointY * 2
-patient_id = "999999"
-exam_id = "999999"
-clinic_id = "999999"
-home = str(Path.home())
-if 'greee' in home:
-    main_folder = r"C:\Users\greee\Desktop\plotting_output"
-elif 'moshemalka' in home:
-    main_folder = r"/Users/moshemalka/Desktop/Work/Plotting_Eyenjoy/plotting_output"
-else: # Ishai's (work) laptop
-    main_folder = "plotting_output"
+midpointX = midpointY = Termx = Termy = patient_id = exam_id = None
+
+_interval = 400
 ############################################################################################################
 
 def collecting_drawing_data(df):
@@ -50,79 +33,70 @@ def collecting_drawing_data(df):
         ]
 
     df = df.loc[df['TestType'] == 'Starbismus', [
-    'RightEye', 'LeftEye', 'lx', 'ly', 'rx', 'ry', 'lpz', 'rpz']]
+    'RightEye', 'LeftEye', 'lx', 'ly', 'rx', 'ry']]
     
-    if df.empty:
-        print("Error - DataFrame is empty after collecting data.")
-        return [pd.DataFrame(), pd.DataFrame()]
+    if df.empty: return [pd.DataFrame(), pd.DataFrame()]
     
-    up_case = df.loc[(df['RightEye'] == 1), ['lx', 'ly', 'rx', 'ry', 'rpz']]
+    up_case = df.loc[(df['RightEye'] == 1), ['lx', 'ly', 'rx', 'ry']]
     up_case = normilize_y(up_case.copy())
 
-    down_case = df.loc[(df['LeftEye'] == 1), ['lx', 'ly', 'rx', 'ry', 'lpz']]
+    down_case = df.loc[(df['LeftEye'] == 1), ['lx', 'ly', 'rx', 'ry']]
     down_case = normilize_y(down_case.copy())
 
     up_case, down_case = remove_outliers(up_case, down_case)
 
     return [up_case, down_case]
 
-def draw(down_case, up_case):
-    f, ((ax2, ax1), (ax4, ax3)) = plt.subplots(2, 2)
-    if not up_case.empty:
-        sub_draw(up_case[['lx']], up_case[['ly']], ax2, '(L) closed')
-        sub_draw(up_case[['rx']], up_case[['ry']], ax1, '(R) opened')
-    if not down_case.empty:
-        sub_draw(down_case[['lx']], down_case[['ly']], ax4, '(L) opened')
-        sub_draw(down_case[['rx']], down_case[['ry']], ax3, '(R) closed')
-    # plt.show()
-    f.subplots_adjust(hspace=0.3)
-    f.suptitle(f"Patient ID: {patient_id} - Strabismus")
-
-    if sys.platform == "win32":
-        path = fr"{main_folder}\strabismus_{exam_id}.png"
-    else:
-        path = fr"{main_folder}/strabismus_{exam_id}.png"
-    plt.savefig(path, format="png")
-    plt.close(f)
-
-def sub_draw(x, y, plot, title):
-    if(not x.empty and not y.empty):
-        x = x.values
-        y = y.values
-        di = 255 / len(x)
-        for i in range(len(x)):
-            colormap = [0+i*di/256, .1, 1.0-i*di/256]
-            # if x[i] > (midpointX + 1000) or x[i] < (midpointX - 1000) or y[i] > (midpointY + 400) or y[i] < (midpointY - 400):
-            #     plot.plot(x[i], y[i], marker='s', color='black')
-            # else:
-            plot.plot(x[i], y[i], marker='o', color=colormap)
-                
-        plot.plot(x[0], y[0], marker='o', color='green')  # the start (first point)
-        plot.plot(x[len(x)-1], y[len(y)-1], marker='o', color='c')  # the end  (last point)
-        plot.plot(np.mean(x), np.mean(y), marker='o', color='yellow') # total data average point
-
+def draw(down_case, up_case, to_plot):
+    for p in to_plot:
+        fig = plt.figure()
+        camera = Camera(fig)
+        if p['loc'] == 'up':
+            x = up_case[p['x']].values
+            y = up_case[p['y']].values
+        else:
+            x = down_case[p['x']].values
+            y = down_case[p['y']].values
+            
         if len(x) > 60:
             case_range = int(len(x) / 6)
         elif 60 >= len(x) >= 30:
             case_range = int(len(x) / 4)
         else: # <30
             case_range = 5
-            
-        plot.plot(np.mean(x[:case_range]), np.mean(y[:case_range]), marker='X', color='xkcd:fluorescent green', markeredgewidth=0.5, markeredgecolor='b')  # the start (first 10)
-        plot.plot(np.mean(x[-case_range:]), np.mean(y[-case_range:]), marker='X', color='xkcd:red orange', markeredgewidth=0.5, markeredgecolor='b')  # the end (last 10)
-
-        plot.plot(midpointX, midpointY, marker='+', color='k')  # the middle (black)
-        plot.plot([midpointX-77, midpointX-77], [midpointY-72, midpointY+72], "k-", linewidth=0.8) # center black cube - left
-        plot.plot([midpointX+77, midpointX+77], [midpointY-72, midpointY+72], "k-", linewidth=0.8) # center black cube - right
-        plot.plot([midpointX-77, midpointX+77], [midpointY-72, midpointY-72], "k-", linewidth=0.8) # center black cube - bottom
-        plot.plot([midpointX-77, midpointX+77], [midpointY+72, midpointY+72], "k-", linewidth=0.8) # center black cube - top
 
         # ***************** IF WE WANT ORIGINAL SCALE *****************
-        # plot.axis([0.0, 1368, 0.0, 912])
+        # plt.axis([0.0, 1368, 0.0, 912])
 
         # ***************** IF WE WANT DYNAMIC SCALE *****************
-        plot.axis(xmin=min(x)-200, xmax=max(x)+200, ymin=min(y)-200, ymax=max(y)+200)
-        plot.set_title(f"{title} [{len(x)}]")
+        plt.axis(xmin=min(x)-200, xmax=max(x)+200, ymin=min(y)-200, ymax=max(y)+200)
+        plt.title(f"{p['loc'].title()} - {p['text']} [{len(x)}]")
+
+        di = 255 / len(x)
+        colormap = [(0 + x * di / 256, .1, 1.0 - x * di / 256) for x in range(len(x))]
+        for i in range(len(x)):
+            plt.plot(x[0], y[0], marker='o', color='green')  # the start (first point)
+            plt.plot(x[len(x)-1], y[len(y)-1], marker='o', color='c')  # the end  (last point)
+            plt.plot(np.mean(x), np.mean(y), marker='o', color='yellow') # total data average point
+
+            plt.plot(midpointX, midpointY, marker='+', color='k')  # the middle (black)
+            plt.plot([midpointX-77, midpointX-77], [midpointY-72, midpointY+72], "k-", linewidth=0.8) # center black cube - left
+            plt.plot([midpointX+77, midpointX+77], [midpointY-72, midpointY+72], "k-", linewidth=0.8) # center black cube - right
+            plt.plot([midpointX-77, midpointX+77], [midpointY-72, midpointY-72], "k-", linewidth=0.8) # center black cube - bottom
+            plt.plot([midpointX-77, midpointX+77], [midpointY+72, midpointY+72], "k-", linewidth=0.8) # center black cube - top
+            
+            plt.plot(np.mean(x[:case_range]), np.mean(y[:case_range]), marker='X', color='xkcd:fluorescent green', markeredgewidth=0.5, markeredgecolor='b')  # the start (first 10)
+            plt.plot(np.mean(x[-case_range:]), np.mean(y[-case_range:]), marker='X', color='xkcd:red orange', markeredgewidth=0.5, markeredgecolor='b')  # the end (last 10)
+            
+            plt.scatter(x[:i+1], y[:i+1], marker='o', color=colormap[:i+1])
+            
+            camera.snap()
+            
+        animation = camera.animate(interval=_interval, repeat=False)
+        animation.save(f'strabismus_{patient_id}_{exam_id}_{p["loc"]}_{p["text"]}_{exam_id}.gif', writer='pillow')
+
+        plt.close(fig)
+        print(f"Finished Animating Strabismus Plot for : {p['loc']} , {p['text']}")
 
 def normilize_y(data):
     """ turns the y axis upside down.
@@ -170,7 +144,6 @@ def get_params(tellers):
         plot_teller(teller_data, pre_data, teller_type, opened_eye)
 
 def plot_teller(teller_data, pre_data, teller_type, opened_eye):
-    fig = plt.figure()
     eye = opened_eye.lower()
     center_x = teller_data['X'].iloc[0]   	# center of teller picture on the X scale
     center_y = teller_data['Y'].iloc[0]   	# center of the teller picture on the Y scale
@@ -196,7 +169,7 @@ def plot_teller(teller_data, pre_data, teller_type, opened_eye):
     else: # <30
         case_range = 5
 
-        # Setting custom ticks
+    # Setting custom ticks
     # plt.xticks(np.arange(0, max(x)+50, step=50))
     # plt.yticks(np.arange(0, max(y)+50, step=50))
 
@@ -289,29 +262,12 @@ def plot_teller(teller_data, pre_data, teller_type, opened_eye):
 
         camera.snap()
 
-    animation = camera.animate(interval=400, repeat=False)
+    animation = camera.animate(interval=_interval, repeat=False)
 
-    if sys.platform == 'win32':
-        path = fr"{main_folder}\tellers_{patient_id}_{exam_id}_{teller_type}_{ind}_{opened_eye}_{teller_position}.png"
-    else:
-        path = fr"{main_folder}/tellers_{patient_id}_{exam_id}_{teller_type}_{ind}_{opened_eye}_{teller_position}.png"
-            
-    animation.save(fr'tellers_{patient_id}_{exam_id}_{teller_type}_{ind}_{opened_eye}_{teller_position}.gif')
+    animation.save(f'tellers_{patient_id}_{exam_id}_{teller_type}_{ind}_{opened_eye}_{teller_position}.gif', writer='pillow')
 
     plt.close(fig)
-
-def set_globals_exam(input_json):
-    global patient_id, exam_id, clinic_id, Termx, Termy, midpointX, midpointY
-    try:
-        Termx = input_json.get("ScreenWidth")
-        Termy = input_json.get("ScreenHight")
-        midpointX = int(Termx / 2)
-        midpointY = int(Termy / 2)
-        patient_id = input_json.get("PatientId")
-        exam_id = input_json.get("ExamId")
-        clinic_id = input_json.get("ClinicId")
-    except Exception as e:
-        print(f"Setting globals failed !\n{e}")
+    print(f"Finished Animating Teller Plot for : Patient Id : {patient_id}, Exam Id : {exam_id}, Teller Type : {teller_type}, Teller Index : {ind}, Opened Eye : {opened_eye}, Teller Position : {teller_position}")
 
 def remove_outliers(up, down):
     """ drops the points that are farthest from the main mass."""
@@ -335,31 +291,68 @@ def remove_outliers(up, down):
     return [up.drop(up_drop), down.drop(down_drop)]
 
 def plotting(strabismus=True, tellers=True):
+    global patient_id, exam_id, Termx, Termy, midpointX, midpointY
     with open('tmp.json', 'rb') as j:
         input_json = json.loads(j.read())
 
     print(f"Protocol : {input_json['Protocol']}")
 
-    set_globals_exam(input_json)
+    patient_id = input_json.get("PatientId", 'No Patient Id')
+    exam_id = input_json.get("ExamId", 'No Exam Id')
+
     df = convert(input_json)
+
+    Termx = input_json.get("ScreenWidth", 684)
+    Termy = input_json.get("ScreenHight", 456)
+    midpointX = int(Termx / 2)
+    midpointY = int(Termy / 2)
+
     if(df.empty):
         print("NO DATA : number of rows (data points) for left/right/both eyes is lower than 8 !")
         return
-    
+
     if strabismus:
+        strabismus_to_plot = [
+            {
+                'loc' : 'up',
+                'x' : 'lx',
+                'y' : 'ly',
+                'text' : 'L Eye - closed'
+            },
+            {
+                'loc' : 'up',
+                'x' : 'rx',
+                'y' : 'ry',
+                'text' : 'R Eye - opened'
+            },
+            {
+                'loc' : 'down',
+                'x' : 'lx',
+                'y' : 'ly',
+                'text' : 'L Eye - opened'
+            },
+            {
+                'loc' : 'down',
+                'x' : 'rx',
+                'y' : 'ry',
+                'text' : 'R Eye - closed'
+            }
+        ]
         start_time_strabismus = time.time()
 
         # with removing outliers
         up_case_draw, down_case_draw = collecting_drawing_data(df)
-        draw(down_case_draw, up_case_draw)
+        if up_case_draw.empty or down_case_draw.empty: print("Empty Strabismus DataFrame !")
+        else: draw(down_case_draw, up_case_draw, strabismus_to_plot)
 
-        print(f"Strabismus ---{(time.time() - start_time_strabismus)} seconds ---")
+        print(f"Strabismus --- {(time.time() - start_time_strabismus)} seconds ---")
     
     if tellers:
         start_time_tellers = time.time()
         teller_df = get_teller_data(df)
-        get_params(teller_df)
-        print(f"Tellers ---{(time.time() - start_time_tellers)} seconds ---")
+        if teller_df.empty: print("Empty Tellers DataFrame !")
+        else: get_params(teller_df)
+        print(f"Tellers --- {(time.time() - start_time_tellers)} seconds ---")
 
 if __name__ == '__main__':
-    plotting(strabismus=False)
+    plotting()
